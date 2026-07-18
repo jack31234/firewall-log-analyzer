@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+.env
+alert_report.csv
