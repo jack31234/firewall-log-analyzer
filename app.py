@@ -103,7 +103,7 @@ else:
 st.subheader("⚙️ 設定")
 exclude_input = st.text_input(
     "排除IP清單（多個IP用逗號分隔，例如：192.168.21.1, 192.168.21.2）",
-    value="192.168.21.2"  # 預設把路由器IP填進去
+    value=""  # 預設把路由器IP填進去
 )
 exclude_ips = [ip.strip() for ip in exclude_input.split(",") if ip.strip()]
 
