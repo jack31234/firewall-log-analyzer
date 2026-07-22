@@ -29,16 +29,18 @@ def analyze_with_ollama(alert_type, ip, detail):
     except:
         return "Ollama連線失敗，請確認Ollama服務是否啟動"
 
-def analyze_log(content):
+def analyze_log(content, exclude_ips=[]):
     ip_counts = {}
     ip_port_log = {}
     alerts = []
     logs = []
 
     for line in content.splitlines():
-        match = re.search(r"srcip=([\d.]+).*dstport=(\d+).*action=""(\w+[-\w]*)", line)
+        match = re.search(r'srcip=([\d.]+).*dstport=(\d+).*action="(\w[\w-]*)"', line)
         if match:
             ip = match.group(1)
+            if ip in exclude_ips:
+                continue  # 跳過排除清單裡的IP
             port = int(match.group(2))
             action = match.group(3)
 
@@ -80,6 +82,8 @@ def analyze_log(content):
         if count > THRESHOLD:
             logs.append({"type": "警告", "ip": ip, "msg": f"{ip} 共連線{count}次，疑似攻擊行為"})
             alerts.append({"IP": ip, "連線次數": count, "異常類型": "高頻連線", "說明": f"共連線{count}次，超過門檻值{THRESHOLD}"})
+        else:
+            logs.append({"type": "正常", "ip": ip, "msg": f"{ip} 共連線{count}次，正常"})
 
     return logs, alerts, ip_counts
 
@@ -89,21 +93,33 @@ st.caption("上傳log檔案，自動偵測異常連線並進行AI分析")
 
 uploaded_file = st.file_uploader("上傳防火牆log檔案", type=["log", "txt"])
 
+st.subheader("⚙️ 設定")
+exclude_input = st.text_input(
+    "排除IP清單（多個IP用逗號分隔，例如：192.168.21.1, 192.168.21.2）",
+    value="192.168.21.2"  # 預設把路由器IP填進去
+)
+exclude_ips = [ip.strip() for ip in exclude_input.split(",") if ip.strip()]
+
 if uploaded_file:
     content = uploaded_file.read().decode("utf-8")
     st.success(f"已載入檔案：{uploaded_file.name}，共 {len(content.splitlines())} 行")
 
     if st.button("開始分析"):
         with st.spinner("分析中..."):
-            logs, alerts, ip_counts = analyze_log(content)
+            logs, alerts, ip_counts = analyze_log(content, exclude_ips)
 
         st.subheader("📋 偵測結果")
-        for log in logs:
-            if log["type"] == "高風險":
+        abnormal_logs = [l for l in logs if l["type"] != "正常"]
+
+        if len(abnormal_logs) == 0:
+           st.success("🟢 未偵測到異常，所有連線正常")
+        else:
+            for log in abnormal_logs:
+               if log["type"] == "高風險":
                 st.error(f"🔴 [{log['type']}] {log['msg']}")
-            elif log["type"] == "Port Scan":
+               elif log["type"] == "Port Scan":
                 st.warning(f"🟠 [{log['type']}] {log['msg']}")
-            else:
+               else:
                 st.warning(f"🟡 [{log['type']}] {log['msg']}")
 
         st.subheader("🤖 AI攻擊分析")
