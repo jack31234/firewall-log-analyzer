@@ -91,7 +91,14 @@ def analyze_log(content, exclude_ips=[]):
 st.title("🔥 防火牆Log分析工具")
 st.caption("上傳log檔案，自動偵測異常連線並進行AI分析")
 
-uploaded_file = st.file_uploader("上傳防火牆log檔案", type=["log", "txt"])
+source = st.radio("選擇資料來源", ["上傳Log檔案", "讀取SQLite DB"])
+
+if source == "上傳Log檔案":
+    uploaded_file = st.file_uploader("上傳防火牆log檔案", type=["log", "txt"])
+    db_path = None
+else:
+    uploaded_file = None
+    db_path = st.text_input("SQLite DB路徑", placeholder=r"例如：E:\project\firewall_analyzer\SQL\firewall.db")
 
 st.subheader("⚙️ 設定")
 exclude_input = st.text_input(
@@ -100,9 +107,27 @@ exclude_input = st.text_input(
 )
 exclude_ips = [ip.strip() for ip in exclude_input.split(",") if ip.strip()]
 
+content = None
+
 if uploaded_file:
     content = uploaded_file.read().decode("utf-8")
     st.success(f"已載入檔案：{uploaded_file.name}，共 {len(content.splitlines())} 行")
+elif db_path:
+    try:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT ldate, ltime, msg FROM logs ORDER BY utcsec DESC LIMIT 10000")
+        rows = cursor.fetchall()
+        conn.close()
+        # 把DB資料組合成跟log檔案一樣的格式
+        lines = []
+        for row in rows:
+            lines.append(f"date={row[0]} time={row[1]} {row[2]}")
+        content = "\n".join(lines)
+        st.success(f"已從DB載入 {len(rows)} 筆資料")
+    except Exception as e:
+        st.error(f"DB連線失敗：{e}")
 
     if st.button("開始分析"):
         with st.spinner("分析中..."):
