@@ -36,7 +36,7 @@ def analyze_log(content):
     logs = []
 
     for line in content.splitlines():
-        match = re.search(r"SRC=(\d+\.\d+\.\d+\.\d+).*DPORT=(\d+).*ACTION=(\w+)", line)
+        match = re.search(r"srcip=([\d.]+).*dstport=(\d+).*action=""(\w+[-\w]*)", line)
         if match:
             ip = match.group(1)
             port = int(match.group(2))
@@ -47,12 +47,15 @@ def analyze_log(content):
             else:
                 ip_counts[ip] = 1
 
-            if port in HIGH_RISK_PORTS and action == "DENY":
-                logs.append({"type": "高風險", "ip": ip, "port": port, "msg": f"{ip} 嘗試連線高風險port {port}，已被封鎖"})
+            if port in HIGH_RISK_PORTS and action in ["deny", "client-rst"]:
+                logs.append({"type": "高風險", "ip": ip, "port": port, "msg": f"{ip} 嘗試連線高風險port {port}，應該被封鎖"})
 
-            time_match = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+            time_match = re.search(r"date=(\d{4}-\d{2}-\d{2}) time=(\d{2}:\d{2}:\d{2})", line)
             if time_match:
-                timestamp = datetime.strptime(time_match.group(1), "%Y-%m-%d %H:%M:%S")
+                timestamp = datetime.strptime(
+                     f"{time_match.group(1)} {time_match.group(2)}", 
+                     "%Y-%m-%d %H:%M:%S"
+                )
                 if ip not in ip_port_log:
                     ip_port_log[ip] = []
                 ip_port_log[ip].append({"time": timestamp, "port": port})
