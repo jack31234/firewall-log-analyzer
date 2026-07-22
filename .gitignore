@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 .env
 alert_report.csv
+SQL/
+*.DB
+*.db
+memory-traffic-*.log
