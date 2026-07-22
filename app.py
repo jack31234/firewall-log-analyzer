@@ -129,7 +129,7 @@ elif db_path:
     except Exception as e:
         st.error(f"DB連線失敗：{e}")
 
-    if st.button("開始分析"):
+if st.button("開始分析"):
         with st.spinner("分析中..."):
             logs, alerts, ip_counts = analyze_log(content, exclude_ips)
 

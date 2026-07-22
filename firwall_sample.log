@@ -1,15 +1,15 @@
-2026-06-24 10:15:01 SRC=192.168.1.50 DST=8.8.8.8 DPORT=443 ACTION=ALLOW
-2026-06-24 10:15:02 SRC=1.2.3.4 DST=192.168.1.10 DPORT=22 ACTION=DENY
-2026-06-24 10:15:02 SRC=1.2.3.4 DST=192.168.1.10 DPORT=23 ACTION=DENY
-2026-06-24 10:15:03 SRC=1.2.3.4 DST=192.168.1.10 DPORT=3389 ACTION=DENY
-2026-06-24 10:15:03 SRC=192.168.1.50 DST=8.8.8.8 DPORT=443 ACTION=ALLOW
-2026-06-24 10:15:04 SRC=1.2.3.4 DST=192.168.1.10 DPORT=22 ACTION=DENY
-2026-06-24 10:15:05 SRC=1.2.3.4 DST=192.168.1.10 DPORT=23 ACTION=DENY
-2026-06-24 10:15:05 SRC=1.2.3.4 DST=192.168.1.10 DPORT=3389 ACTION=DENY
-2026-06-24 10:15:06 SRC=192.168.1.50 DST=8.8.8.8 DPORT=443 ACTION=ALLOW
-2026-06-24 10:15:07 SRC=1.2.3.4 DST=192.168.1.10 DPORT=22 ACTION=DENY
-2026-06-24 10:15:08 SRC=1.2.3.4 DST=192.168.1.10 DPORT=23 ACTION=DENY
-2026-06-24 10:15:09 SRC=1.2.3.4 DST=192.168.1.10 DPORT=3389 ACTION=DENY
-2026-06-24 10:15:10 SRC=1.2.3.4 DST=192.168.1.10 DPORT=22 ACTION=DENY
-2026-06-24 10:15:11 SRC=1.2.3.4 DST=192.168.1.10 DPORT=23 ACTION=DENY
-2026-06-24 10:15:12 SRC=1.2.3.4 DST=192.168.1.10 DPORT=3389 ACTION=DENY
+date=2026-06-24 time=10:15:01 srcip=192.168.1.50 dstip=8.8.8.8 dstport=443 action="accept" service="HTTPS"
+date=2026-06-24 time=10:15:02 srcip=1.2.3.4 dstip=192.168.1.10 dstport=22 action="deny" service="SSH"
+date=2026-06-24 time=10:15:03 srcip=1.2.3.4 dstip=192.168.1.10 dstport=23 action="deny" service="Telnet"
+date=2026-06-24 time=10:15:04 srcip=1.2.3.4 dstip=192.168.1.10 dstport=3389 action="deny" service="RDP"
+date=2026-06-24 time=10:15:05 srcip=1.2.3.4 dstip=192.168.1.10 dstport=22 action="deny" service="SSH"
+date=2026-06-24 time=10:15:06 srcip=1.2.3.4 dstip=192.168.1.10 dstport=23 action="deny" service="Telnet"
+date=2026-06-24 time=10:15:07 srcip=1.2.3.4 dstip=192.168.1.10 dstport=3389 action="deny" service="RDP"
+date=2026-06-24 time=10:15:08 srcip=192.168.1.50 dstip=8.8.8.8 dstport=443 action="accept" service="HTTPS"
+date=2026-06-24 time=10:15:09 srcip=1.2.3.4 dstip=192.168.1.10 dstport=22 action="deny" service="SSH"
+date=2026-06-24 time=10:15:10 srcip=1.2.3.4 dstip=192.168.1.10 dstport=23 action="deny" service="Telnet"
+date=2026-06-24 time=10:15:11 srcip=1.2.3.4 dstip=192.168.1.10 dstport=3389 action="deny" service="RDP"
+date=2026-06-24 time=10:15:12 srcip=1.2.3.4 dstip=192.168.1.10 dstport=22 action="deny" service="SSH"
+date=2026-06-24 time=10:15:13 srcip=192.168.1.50 dstip=8.8.8.8 dstport=443 action="accept" service="HTTPS"
+date=2026-06-24 time=10:15:14 srcip=1.2.3.4 dstip=192.168.1.10 dstport=23 action="deny" service="Telnet"
+date=2026-06-24 time=10:15:15 srcip=1.2.3.4 dstip=192.168.1.10 dstport=3389 action="deny" service="RDP"
