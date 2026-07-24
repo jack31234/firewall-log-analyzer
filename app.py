@@ -3,12 +3,72 @@ import re
 import csv
 import io
 import requests
+import os
 from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
+
+VIRUSTOTAL_API_KEY = os.getenv("VIRUSTOTAL_API_KEY")
 
 THRESHOLD = 5
 SCAN_TIME_WINDOW = 60
 SCAN_PORT_THRESHOLD = 3
 HIGH_RISK_PORTS = [22, 23, 3389, 445]
+
+def check_virustotal(ip):
+    """查詢IP是否為已知惡意來源"""
+    if not VIRUSTOTAL_API_KEY:
+        return "未設定VirusTotal API Key"
+    try:
+        headers = {"x-apikey": VIRUSTOTAL_API_KEY}
+        response = requests.get(
+            f"https://www.virustotal.com/api/v3/ip_addresses/{ip}",
+            headers=headers,
+            timeout=10
+        )
+        if response.status_code == 200:
+            data = response.json()
+            stats = data["data"]["attributes"]["last_analysis_stats"]
+            malicious = stats.get("malicious", 0)
+            suspicious = stats.get("suspicious", 0)
+            total = sum(stats.values())
+            country = data["data"]["attributes"].get("country", "未知")
+            return f"惡意標記：{malicious}/{total}，可疑：{suspicious}/{total}，來源國家：{country}"
+        else:
+            return f"查詢失敗（HTTP {response.status_code}）"
+    except Exception as e:
+        return f"VirusTotal查詢錯誤：{e}"
+
+
+def check_cve(port):
+    """查詢該port相關的已知CVE漏洞"""
+    port_service_map = {
+        22: "SSH",
+        23: "Telnet",
+        445: "SMB",
+        3389: "RDP"
+    }
+    service = port_service_map.get(port, f"port {port}")
+    try:
+        response = requests.get(
+            f"https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch={service}&resultsPerPage=3",
+            timeout=10
+        )
+        if response.status_code == 200:
+            data = response.json()
+            cves = data.get("vulnerabilities", [])
+            if not cves:
+                return f"未找到 {service} 相關CVE"
+            result = f"{service} 最新CVE：\n"
+            for cve in cves:
+                cve_id = cve["cve"]["id"]
+                desc = cve["cve"]["descriptions"][0]["value"][:100]
+                result += f"- {cve_id}：{desc}...\n"
+            return result
+        else:
+            return f"CVE查詢失敗（HTTP {response.status_code}）"
+    except Exception as e:
+        return f"CVE查詢錯誤：{e}"
 
 def analyze_with_ollama(alert_type, ip, detail):
     prompt = f"""你是一位資深資安工程師，請用繁體中文分析以下資安事件：
@@ -150,6 +210,26 @@ if st.button("開始分析"):
         st.subheader("🤖 AI攻擊分析")
         for alert in alerts:
             with st.expander(f"{alert['異常類型']} - {alert['IP']}"):
+                
+                # VirusTotal查詢
+                st.markdown("**🔍 VirusTotal 情資查詢**")
+                with st.spinner("查詢VirusTotal..."):
+                    vt_result = check_virustotal(alert['IP'])
+                st.info(vt_result)
+                
+                # CVE查詢（只有高風險Port才查）
+                if alert['異常類型'] == "Port Scan":
+                    st.markdown("**📋 相關CVE漏洞**")
+                    ports = alert.get('說明', '')
+                    for port in HIGH_RISK_PORTS:
+                        if str(port) in ports:
+                            with st.spinner(f"查詢port {port} 相關CVE..."):
+                                cve_result = check_cve(port)
+                            st.warning(cve_result)
+                            break
+
+                # Ollama AI分析
+                st.markdown("**🤖 AI分析**")
                 with st.spinner("AI分析中..."):
                     result = analyze_with_ollama(alert['異常類型'], alert['IP'], alert['說明'])
                 st.write(result)
