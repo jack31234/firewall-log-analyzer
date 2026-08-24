@@ -4,9 +4,12 @@ import csv
 import io
 import requests
 import os
+import sqlite3
+import pandas as pd
 from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
+from collections import defaultdict
 
 VIRUSTOTAL_API_KEY = os.getenv("VIRUSTOTAL_API_KEY")
 
@@ -70,6 +73,13 @@ def check_cve(port):
     except Exception as e:
         return f"CVE查詢錯誤：{e}"
 
+def summarize_alerts(alerts):
+    """依異常類型分組，避免同類型異常逐一重複問AI"""
+    grouped = defaultdict(list)
+    for alert in alerts:
+        grouped[alert['異常類型']].append(alert)
+    return grouped
+
 def analyze_with_ollama(alert_type, ip, detail):
     prompt = f"""你是一位資深資安工程師，請用繁體中文分析以下資安事件：
 事件類型：{alert_type}
@@ -89,38 +99,37 @@ def analyze_with_ollama(alert_type, ip, detail):
     except:
         return "Ollama連線失敗，請確認Ollama服務是否啟動"
 
-def analyze_log(content, exclude_ips=[]):
+def analyze_log_lines(lines, exclude_ips=[]):
     ip_counts = {}
     ip_port_log = {}
     alerts = []
     logs = []
 
-    for line in content.splitlines():
+    high_risk_hits = {}
+
+    for line in lines:
         match = re.search(r'srcip=([\d.]+).*dstport=(\d+).*action="(\w[\w-]*)"', line)
         if match:
             ip = match.group(1)
             if ip in exclude_ips:
-                continue  # 跳過排除清單裡的IP
+                continue
             port = int(match.group(2))
             action = match.group(3)
 
-            if ip in ip_counts:
-                ip_counts[ip] += 1
-            else:
-                ip_counts[ip] = 1
+            ip_counts[ip] = ip_counts.get(ip, 0) + 1
 
             if port in HIGH_RISK_PORTS and action in ["deny", "client-rst"]:
+                key = (ip, port)
+                high_risk_hits[key] = high_risk_hits.get(key, 0) + 1
                 logs.append({"type": "高風險", "ip": ip, "port": port, "msg": f"{ip} 嘗試連線高風險port {port}，應該被封鎖"})
 
             time_match = re.search(r"date=(\d{4}-\d{2}-\d{2}) time=(\d{2}:\d{2}:\d{2})", line)
             if time_match:
                 timestamp = datetime.strptime(
-                     f"{time_match.group(1)} {time_match.group(2)}", 
-                     "%Y-%m-%d %H:%M:%S"
+                    f"{time_match.group(1)} {time_match.group(2)}",
+                    "%Y-%m-%d %H:%M:%S"
                 )
-                if ip not in ip_port_log:
-                    ip_port_log[ip] = []
-                ip_port_log[ip].append({"time": timestamp, "port": port})
+                ip_port_log.setdefault(ip, []).append({"time": timestamp, "port": port})
 
     for ip, records in ip_port_log.items():
         records.sort(key=lambda x: x["time"])
@@ -128,8 +137,7 @@ def analyze_log(content, exclude_ips=[]):
             window_start = records[i]["time"]
             ports_in_window = set()
             for j in range(i, len(records)):
-                time_diff = (records[j]["time"] - window_start).total_seconds()
-                if time_diff <= SCAN_TIME_WINDOW:
+                if (records[j]["time"] - window_start).total_seconds() <= SCAN_TIME_WINDOW:
                     ports_in_window.add(records[j]["port"])
                 else:
                     break
@@ -144,8 +152,38 @@ def analyze_log(content, exclude_ips=[]):
             alerts.append({"IP": ip, "連線次數": count, "異常類型": "高頻連線", "說明": f"共連線{count}次，超過門檻值{THRESHOLD}"})
         else:
             logs.append({"type": "正常", "ip": ip, "msg": f"{ip} 共連線{count}次，正常"})
+    for (ip, port), count in high_risk_hits.items():
+        alerts.append({
+            "IP": ip,
+            "連線次數": count,
+            "異常類型": "高風險",
+            "說明": f"嘗試連線高風險port {port}，共{count}次",
+            "Port": port  # 額外存port，之後CVE查詢不用再用正規表達式解析
+        })
 
     return logs, alerts, ip_counts
+
+
+def analyze_log(content, exclude_ips=[]):
+    return analyze_log_lines(content.splitlines(), exclude_ips)
+
+def ensure_db_index(db_path):
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_utcsec ON logs(utcsec)")
+    conn.commit()
+    conn.close()
+
+def db_line_generator(db_path, batch_size=50000):
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    cursor = conn.cursor()
+    cursor.execute("SELECT ldate, ltime, msg FROM logs ORDER BY utcsec")
+    while True:
+        rows = cursor.fetchmany(batch_size)
+        if not rows:
+            break
+        for row in rows:
+            yield f"date={row[0]} time={row[1]} {row[2]}"
+    conn.close()
 
 # ===== Streamlit介面 =====
 st.title("🔥 防火牆Log分析工具")
@@ -173,25 +211,29 @@ if uploaded_file:
     content = uploaded_file.read().decode("utf-8")
     st.success(f"已載入檔案：{uploaded_file.name}，共 {len(content.splitlines())} 行")
 elif db_path:
-    try:
-        import sqlite3
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute("SELECT ldate, ltime, msg FROM logs ORDER BY utcsec DESC LIMIT 10000")
-        rows = cursor.fetchall()
-        conn.close()
-        # 把DB資料組合成跟log檔案一樣的格式
-        lines = []
-        for row in rows:
-            lines.append(f"date={row[0]} time={row[1]} {row[2]}")
-        content = "\n".join(lines)
-        st.success(f"已從DB載入 {len(rows)} 筆資料")
-    except Exception as e:
-        st.error(f"DB連線失敗：{e}")
+    if os.path.exists(db_path):
+        try:
+            ensure_db_index(db_path)
+            st.success(f"已指定DB路徑：{db_path}")
+        except Exception as e:
+            st.error(f"DB連線失敗：{e}")
+    else:
+        st.error("找不到指定的DB檔案，請確認路徑")
 
 if st.button("開始分析"):
-        with st.spinner("分析中..."):
-            logs, alerts, ip_counts = analyze_log(content, exclude_ips)
+        if not content and not db_path:
+            st.warning("請先上傳檔案或輸入DB路徑")
+            st.stop()
+
+        with st.spinner("分析中，資料量大時請耐心等候..."):
+            if uploaded_file:
+                logs, alerts, ip_counts = analyze_log(content, exclude_ips)
+            else:
+                try:
+                    logs, alerts, ip_counts = analyze_log_lines(db_line_generator(db_path), exclude_ips)
+                except Exception as e:
+                    st.error(f"DB分析失敗：{e}")
+                    st.stop()
 
         st.subheader("📋 偵測結果")
         abnormal_logs = [l for l in logs if l["type"] != "正常"]
@@ -208,36 +250,44 @@ if st.button("開始分析"):
                 st.warning(f"🟡 [{log['type']}] {log['msg']}")
 
         st.subheader("🤖 AI攻擊分析")
-        for alert in alerts:
-            with st.expander(f"{alert['異常類型']} - {alert['IP']}"):
-                
-                # VirusTotal查詢
-                st.markdown("**🔍 VirusTotal 情資查詢**")
-                with st.spinner("查詢VirusTotal..."):
-                    vt_result = check_virustotal(alert['IP'])
-                st.info(vt_result)
-                
-                # CVE查詢（只有高風險Port才查）
-                if alert['異常類型'] == "Port Scan":
+        grouped_alerts = summarize_alerts(alerts)
+
+        for alert_type, alert_list in grouped_alerts.items():
+            ip_list = [a['IP'] for a in alert_list]
+            with st.expander(f"{alert_type}（共 {len(alert_list)} 個IP）"):
+
+                st.write(f"涉及IP：{', '.join(ip_list[:20])}" + ("...等" if len(ip_list) > 20 else ""))
+
+                # VirusTotal：只抽查前3個IP，避免幾百個IP逐一查爆API額度
+                st.markdown("**🔍 VirusTotal 情資查詢（抽查前3個IP）**")
+                for alert in alert_list[:3]:
+                    with st.spinner(f"查詢 {alert['IP']}..."):
+                        vt_result = check_virustotal(alert['IP'])
+                    st.info(f"{alert['IP']}：{vt_result}")
+
+                # CVE查詢：只有「高風險」類型才查，且針對這組裡出現過的port各查一次
+                if alert_type == "高風險":
                     st.markdown("**📋 相關CVE漏洞**")
-                    ports = alert.get('說明', '')
-                    for port in HIGH_RISK_PORTS:
-                        if str(port) in ports:
+                    checked_ports = set()
+                    for alert in alert_list:
+                        port = alert['Port']
+                        if port not in checked_ports:
+                            checked_ports.add(port)
                             with st.spinner(f"查詢port {port} 相關CVE..."):
                                 cve_result = check_cve(port)
-                            st.warning(cve_result)
-                            break
+                            st.warning(f"Port {port}：{cve_result}")
 
-                # Ollama AI分析
-                st.markdown("**🤖 AI分析**")
+                # AI分析：整組只問一次，用彙總後的資訊
+                st.markdown("**🤖 AI分析（彙總分析）**")
+                summary_detail = f"共有{len(alert_list)}個IP出現此類異常，範例事件：{alert_list[0]['說明']}"
                 with st.spinner("AI分析中..."):
-                    result = analyze_with_ollama(alert['異常類型'], alert['IP'], alert['說明'])
+                    result = analyze_with_ollama(alert_type, f"{len(ip_list)}個IP（例如{ip_list[0]}）", summary_detail)
                 st.write(result)
 
         st.subheader("📥 下載報告")
         output = io.StringIO()
         output.write('\ufeff')
-        writer = csv.DictWriter(output, fieldnames=["IP", "連線次數", "異常類型", "說明"])
+        writer = csv.DictWriter(output, fieldnames=["IP", "連線次數", "異常類型", "說明", "Port"], restval="")
         writer.writeheader()
         writer.writerows(alerts)
         st.download_button("下載CSV報告", output.getvalue(), "alert_report.csv", "text/csv")
